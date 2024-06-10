@@ -45,9 +45,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         info!("PageStart count match PageEnd count");
     }
 
+    println!("Found {} pages\nSelect page:", lookup_map["PageStart"].len());
+    let g: usize = rprompt::read_reply().unwrap().parse()?;
+
+    println!("Start byte: {} \nEnd byte: {}", lookup_map["PageStart"][g-1], lookup_map["PageEnd"][g-1]);
+
     for (key, value) in lookup_map {
         println!("{}: {:?}", key, value);
     }
 
     Ok(())
 }
+
