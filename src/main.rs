@@ -1,100 +1,87 @@
-mod structured_field_identifiers;
+mod boundary;
+mod chunk;
+mod patterns;
+mod state;
+mod writer;
 
-use log::info;
-use std::collections::HashMap;
-use std::env;
-use std::error::Error;
 use std::fs::File;
 use std::io::Read;
+use std::path::PathBuf;
 
-use structured_field_identifiers::keyword_store;
+use clap::Parser;
+use boundary::BoundaryDetector;
+use chunk::ChunkPlanner;
+use state::StateMachine;
+use writer::OutputWriter;
 
-fn main() -> Result<(), Box<dyn Error>> {
-    env_logger::init();
-    let args: Vec<String> = env::args().collect();
-    let arg1 = &args[1];
+#[derive(Parser)]
+#[command(name = "afp-split")]
+#[command(about = "Split AFP documents by document boundary with max output size")]
+struct Args {
+    #[arg(short, long)]
+    input: PathBuf,
 
-    // opens file in read only - alternatives present for reading entire file
-    let mut f = File::open(arg1)?;
-    // construct new array
-    let mut buffer = Vec::new();
+    #[arg(short, long, default_value = "output")]
+    output_dir: PathBuf,
 
-    // read all of file into array
-    f.read_to_end(&mut buffer)?;
+    #[arg(short, long)]
+    max_size: u64,
+}
 
-    /*
-    NEW IMPLEMENTATON:
-    change implementation from read_to_end to read
-    keep last buffer when reading next
-    new loop logic:
-    while loop to read entire file
-    1. look for start doc
-    2. look for start page and end doc
-    3. look for structured fields and end page
-    4. back to 2
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args = Args::parse();
 
-    able to skip 3 if looking for specific page, only count start page
-     */
+    let file_size = File::open(&args.input)?.metadata()?.len();
 
-    // get keywords to look for
-    let keywords = keyword_store()?;
+    let detector = BoundaryDetector::new();
+    let source = File::open(&args.input)?;
+    let boundaries = detector.detect(source);
 
-    // new hashmap to store results
-    let mut lookup_map: HashMap<&str, Vec<u32>> = HashMap::default();
+    let mut state_machine = StateMachine::new();
+    let mut events: Vec<state::AfpEvent> = Vec::with_capacity(boundaries.len());
 
-    // create size 3 bytes window slices
-    for (i, w) in buffer.windows(3).enumerate() {
-        // iterate over keywords store hashmap
-        for (key, value) in &keywords {
-            // byte sequence found insert index into hashmap
-            if w == value {
-                lookup_map
-                    .entry(key)
-                    .or_default()
-                    .push(i.try_into().unwrap())
+    for (boundary, offset) in boundaries {
+        state_machine.feed(boundary, offset, &mut events);
+    }
+    state_machine.finish(file_size, &mut events);
+
+    let mut doc_count: usize = 0;
+    let mut first_doc_offset: u64 = 0;
+
+    for event in &events {
+        if let state::AfpEvent::DocumentStart { offset } = event {
+            doc_count += 1;
+            if first_doc_offset == 0 {
+                first_doc_offset = *offset;
             }
         }
     }
 
-    if lookup_map["PageStart"].len() != lookup_map["PageEnd"].len() {
-        panic!("Uneven PageStart and PageEnd found. Error in file.")
+    println!(
+        "Found {} document(s) across {} page(s)",
+        doc_count, state_machine.page_count
+    );
+
+    if doc_count == 0 {
+        println!("Nothing to split.");
+        return Ok(());
+    }
+
+    let preamble_bytes = if first_doc_offset > 0 {
+        let mut f = File::open(&args.input)?;
+        let mut buf = vec![0u8; first_doc_offset as usize];
+        f.read_exact(&mut buf)?;
+        buf
     } else {
-        info!("PageStart count match PageEnd count");
-    }
+        Vec::new()
+    };
 
-    println!(
-        "Found {} pages\nSelect page:",
-        lookup_map["PageStart"].len()
-    );
-    let g: usize = rprompt::read_reply().unwrap().parse()?;
+    let chunks = ChunkPlanner::plan(&events, args.max_size);
 
-    println!(
-        "Start byte: {} \nEnd byte: {}",
-        lookup_map["PageStart"][g - 1],
-        lookup_map["PageEnd"][g - 1]
-    );
+    println!("Splitting into {} output file(s)\n", chunks.len());
 
-    for (key, value) in lookup_map {
-        println!("{}: {:?}", key, value);
-    }
+    let writer = OutputWriter::new(args.output_dir, &args.input);
+    writer.write_chunks(&args.input, &preamble_bytes, &chunks)?;
 
     Ok(())
-}
-
-pub fn get_pages(
-    start_page: &u8,
-    end_page: &u8,
-    mut indexed_elements: HashMap<&str, Vec<u8>>,
-) -> Result<HashMap<&str, Vec<u8>>, Box<dyn Error>> {
-    let index_start = start_page - 1;
-    let index_end = end_page - 1;
-    let start_all = indexed_elements["PageStart"].get(index_start..index_end);
-
-    indexed_elements.entry("PageStart").or_default().insert(
-        "PageStart",
-        indexed_elements["PageStart"][start_page - 1..end_page - 1].to_vec(),
-    );
-    indexed_elements["PageStart"][1..3].to_vec();
-
-    Ok((indexed_elements))
 }
