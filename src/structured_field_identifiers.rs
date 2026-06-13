@@ -1,14 +1,9 @@
-use std::collections::HashMap;
-use std::error::Error;
-
-pub fn keyword_store() -> Result<HashMap<String, Vec<u8>>, Box<dyn Error>> {
-    let mut keywords: HashMap<String, Vec<u8>> = HashMap::new();
-
-    let page_start = hex::decode("D3A8AF")?;
-    let page_end = hex::decode("D3A9AF")?;
-
-    keywords.insert("PageStart".to_string(), page_start);
-    keywords.insert("PageEnd".to_string(), page_end);
-
-    Ok(keywords)
-}
+pub const DOC_START: &[u8] = b"\xD3\xA8\xA8";
+pub const DOC_END: &[u8] = b"\xD3\xA9\xA8";
+pub const PAGE_START: &[u8] = b"\xD3\xA8\xAF";
+pub const PAGE_END: &[u8] = b"\xD3\xA9\xAF";
+pub const SF_START: &[u8] = b"\xD3\x00\x00";
+pub const SF_END: &[u8] = b"\xD3\xFF\xFF";
+pub const NOT_SURE: &[u8] = b"\xD3\xA8\xAF";
+pub const TEXT_START: &[u8] = b"\xD3\xA8\x9B";
+pub const TEXT_DATA: &[u8] = b"\xD3\xEE\x9B";
