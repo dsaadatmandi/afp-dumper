@@ -4,6 +4,5 @@ pub const PAGE_START: &[u8] = b"\xD3\xA8\xAF";
 pub const PAGE_END: &[u8] = b"\xD3\xA9\xAF";
 pub const SF_START: &[u8] = b"\xD3\x00\x00";
 pub const SF_END: &[u8] = b"\xD3\xFF\xFF";
-pub const NOT_SURE: &[u8] = b"\xD3\xA8\xAF";
 pub const TEXT_START: &[u8] = b"\xD3\xA8\x9B";
 pub const TEXT_DATA: &[u8] = b"\xD3\xEE\x9B";

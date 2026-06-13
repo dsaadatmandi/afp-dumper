@@ -1,47 +1,87 @@
-mod pattern_handlers;
-mod structured_field_identifiers;
+mod boundary;
+mod chunk;
+mod patterns;
+mod state;
+mod writer;
 
-use aho_corasick::AhoCorasick;
-use pattern_handlers::*;
-use std::error::Error;
-use std::fs::{File};
-use std::io::{BufReader};
-use structured_field_identifiers::*;
+use std::fs::File;
+use std::io::Read;
+use std::path::PathBuf;
 
-fn main() -> Result<(), Box<dyn Error>> {
-    env_logger::init();
-    let arg1: &str = "/Users/milad/code/afp-dumper/data/01_Health_Coverage.afp";
+use clap::Parser;
+use boundary::BoundaryDetector;
+use chunk::ChunkPlanner;
+use state::StateMachine;
+use writer::OutputWriter;
 
-    let f = File::open(arg1)?;
+#[derive(Parser)]
+#[command(name = "afp-split")]
+#[command(about = "Split AFP documents by document boundary with max output size")]
+struct Args {
+    #[arg(short, long)]
+    input: PathBuf,
 
-    let breader = BufReader::new(f);
+    #[arg(short, long, default_value = "output")]
+    output_dir: PathBuf,
 
-    // let data = std::fs::read(arg1)?;
+    #[arg(short, long)]
+    max_size: u64,
+}
 
-    let patterns = &[DOC_START, DOC_END, PAGE_START, PAGE_END, SF_START, SF_END, NOT_SURE, TEXT_START, TEXT_DATA];
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args = Args::parse();
 
-    let ac = AhoCorasick::new(patterns).expect("Failed to create Aho-Corasick automaton");
+    let file_size = File::open(&args.input)?.metadata()?.len();
 
-    let mut page_count: usize = 0;
+    let detector = BoundaryDetector::new();
+    let source = File::open(&args.input)?;
+    let boundaries = detector.detect(source);
 
-    for mat in ac.stream_find_iter(breader) {
-        let mat = mat.expect("Could not unpack value from AC iterator");
+    let mut state_machine = StateMachine::new();
+    let mut events: Vec<state::AfpEvent> = Vec::with_capacity(boundaries.len());
 
-        match mat.pattern().as_usize() {
-            0 => start_document_handler(mat.start()),
-            1 => end_document_handler(mat.start()),
-            2 => start_page_handler(mat.start(), &mut page_count),
-            3 => end_page_handler(mat.start()),
-            4 => start_structured_field_handler(mat.start()),
-            5 => end_structured_field_handler(mat.start()),
-            6 => println!("Not Sure at {}", mat.start()),
-            7 => println!("Text Start at {}", mat.start()),
-            8 => println!("Text Data at {}", mat.start()),
-            _ => unreachable!(),
+    for (boundary, offset) in boundaries {
+        state_machine.feed(boundary, offset, &mut events);
+    }
+    state_machine.finish(file_size, &mut events);
+
+    let mut doc_count: usize = 0;
+    let mut first_doc_offset: u64 = 0;
+
+    for event in &events {
+        if let state::AfpEvent::DocumentStart { offset } = event {
+            doc_count += 1;
+            if first_doc_offset == 0 {
+                first_doc_offset = *offset;
+            }
         }
     }
 
-    println!("Total Pages: {page_count}");
+    println!(
+        "Found {} document(s) across {} page(s)",
+        doc_count, state_machine.page_count
+    );
+
+    if doc_count == 0 {
+        println!("Nothing to split.");
+        return Ok(());
+    }
+
+    let preamble_bytes = if first_doc_offset > 0 {
+        let mut f = File::open(&args.input)?;
+        let mut buf = vec![0u8; first_doc_offset as usize];
+        f.read_exact(&mut buf)?;
+        buf
+    } else {
+        Vec::new()
+    };
+
+    let chunks = ChunkPlanner::plan(&events, args.max_size);
+
+    println!("Splitting into {} output file(s)\n", chunks.len());
+
+    let writer = OutputWriter::new(args.output_dir, &args.input);
+    writer.write_chunks(&args.input, &preamble_bytes, &chunks)?;
 
     Ok(())
 }
