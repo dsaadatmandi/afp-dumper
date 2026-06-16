@@ -33,6 +33,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let file_size = File::open(&args.input)?.metadata()?.len();
 
+    // read file and find all markers
     let detector = BoundaryDetector::new();
     let source = File::open(&args.input)?;
     let boundaries = detector.detect(source);
