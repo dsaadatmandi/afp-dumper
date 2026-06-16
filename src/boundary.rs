@@ -7,6 +7,8 @@ use crate::patterns::*;
 pub enum AfpBoundary {
     BeginDocument,
     EndDocument,
+    BeginPageGroup,
+    EndPageGroup,
     BeginPage,
     EndPage,
 }
@@ -17,7 +19,9 @@ pub struct BoundaryDetector {
 
 impl BoundaryDetector {
     pub fn new() -> Self {
-        let patterns = &[DOC_START, DOC_END, PAGE_START, PAGE_END];
+        let patterns = &[
+            DOC_START, DOC_END, PG_START, PG_END, PAGE_START, PAGE_END,
+        ];
         let ac = AhoCorasick::new(patterns).expect("Failed to create Aho-Corasick automaton");
         Self { ac }
     }
@@ -32,8 +36,10 @@ impl BoundaryDetector {
             let boundary = match mat.pattern().as_usize() {
                 0 => AfpBoundary::BeginDocument,
                 1 => AfpBoundary::EndDocument,
-                2 => AfpBoundary::BeginPage,
-                3 => AfpBoundary::EndPage,
+                2 => AfpBoundary::BeginPageGroup,
+                3 => AfpBoundary::EndPageGroup,
+                4 => AfpBoundary::BeginPage,
+                5 => AfpBoundary::EndPage,
                 _ => continue,
             };
             results.push((boundary, mat.start() as u64));

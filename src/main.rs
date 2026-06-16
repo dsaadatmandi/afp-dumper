@@ -10,13 +10,13 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use boundary::BoundaryDetector;
-use chunk::ChunkPlanner;
+use chunk::{ChunkPlanner, assemble_documents};
 use state::StateMachine;
 use writer::OutputWriter;
 
 #[derive(Parser)]
 #[command(name = "afp-split")]
-#[command(about = "Split AFP documents by document boundary with max output size")]
+#[command(about = "Split AFP documents by page group boundary with max output size")]
 struct Args {
     #[arg(short, long)]
     input: PathBuf,
@@ -45,26 +45,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     state_machine.finish(file_size, &mut events);
 
-    let mut doc_count: usize = 0;
-    let mut first_doc_offset: u64 = 0;
+    let documents = assemble_documents(&events);
 
-    for event in &events {
-        if let state::AfpEvent::DocumentStart { offset } = event {
-            doc_count += 1;
-            if first_doc_offset == 0 {
-                first_doc_offset = *offset;
-            }
-        }
-    }
+    let doc_count = documents.len();
+    let group_count: usize = documents
+        .iter()
+        .map(|d| d.page_groups.len())
+        .sum();
 
     println!(
-        "Found {} document(s) across {} page(s)",
-        doc_count, state_machine.page_count
+        "Found {} document(s) containing {} page group(s) across {} page(s)",
+        doc_count, group_count, state_machine.page_count
     );
 
     if doc_count == 0 {
         println!("Nothing to split.");
         return Ok(());
+    }
+
+    let mut first_doc_offset: u64 = 0;
+    for event in &events {
+        if let state::AfpEvent::DocumentStart { offset } = event {
+            first_doc_offset = *offset;
+            break;
+        }
     }
 
     let preamble_bytes = if first_doc_offset > 0 {
@@ -76,7 +80,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Vec::new()
     };
 
-    let chunks = ChunkPlanner::plan(&events, args.max_size);
+    let chunks = ChunkPlanner::plan(&documents, args.max_size);
 
     println!("Splitting into {} output file(s)\n", chunks.len());
 

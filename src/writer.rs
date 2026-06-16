@@ -3,6 +3,9 @@ use std::io::{self, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use crate::chunk::OutputChunk;
+use crate::patterns::{PF_END, PF_START};
+
+const EDT: &[u8] = b"\xD3\xA9\xA8";
 
 pub struct OutputWriter {
     output_dir: PathBuf,
@@ -30,6 +33,10 @@ impl OutputWriter {
     ) -> io::Result<()> {
         fs::create_dir_all(&self.output_dir)?;
 
+        let needs_epf = preamble
+            .windows(PF_START.len())
+            .any(|w| w == PF_START);
+
         let mut source_file = fs::File::open(source)?;
 
         for (i, chunk) in chunks.iter().enumerate() {
@@ -46,11 +53,32 @@ impl OutputWriter {
                 bytes_written += preamble.len() as u64;
             }
 
-            for doc in &chunk.documents {
-                source_file.seek(SeekFrom::Start(doc.start))?;
-                let mut doc_bytes = Read::by_ref(&mut source_file).take(doc.size());
-                let n = io::copy(&mut doc_bytes, &mut output)?;
+            let (prologue_start, prologue_end) = chunk.prologue;
+            if prologue_end > prologue_start {
+                source_file.seek(SeekFrom::Start(prologue_start))?;
+                let mut prologue_bytes =
+                    Read::by_ref(&mut source_file).take(prologue_end - prologue_start);
+                let n = io::copy(&mut prologue_bytes, &mut output)?;
                 bytes_written += n;
+            }
+
+            let (pg_start, pg_end) = chunk.pg_range;
+            if pg_end > pg_start {
+                source_file.seek(SeekFrom::Start(pg_start))?;
+                let mut pg_bytes =
+                    Read::by_ref(&mut source_file).take(pg_end - pg_start);
+                let n = io::copy(&mut pg_bytes, &mut output)?;
+                bytes_written += n;
+            }
+
+            if chunk.needs_edt {
+                output.write_all(EDT)?;
+                bytes_written += EDT.len() as u64;
+            }
+
+            if needs_epf {
+                output.write_all(PF_END)?;
+                bytes_written += PF_END.len() as u64;
             }
 
             output.flush()?;
