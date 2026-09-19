@@ -5,6 +5,7 @@ pub struct PageGroup {
     pub start: u64,
     pub end: u64,
     pub contains_edt: bool,
+    pub needs_eng: bool,
 }
 
 impl PageGroup {
@@ -33,6 +34,7 @@ pub struct OutputChunk {
     pub page_groups: Vec<PageGroup>,
     pub pg_range: (u64, u64),
     pub needs_edt: bool,
+    pub needs_eng: bool,
 }
 
 pub fn assemble_documents(events: &[AfpEvent]) -> Vec<Document> {
@@ -60,13 +62,15 @@ pub fn assemble_documents(events: &[AfpEvent]) -> Vec<Document> {
                     doc.page_groups.push(PageGroupInProgress {
                         start: *offset,
                         end: 0,
+                        needs_eng: false,
                     });
                 }
             }
-            AfpEvent::PageGroupEnd { offset } => {
+            AfpEvent::PageGroupEnd { offset, needs_eng } => {
                 if let Some(ref mut doc) = current {
                     if let Some(pg) = doc.page_groups.last_mut() {
                         pg.end = *offset;
+                        pg.needs_eng = *needs_eng;
                     }
                 }
             }
@@ -95,6 +99,7 @@ struct DocumentInProgress {
 struct PageGroupInProgress {
     start: u64,
     end: u64,
+    needs_eng: bool,
 }
 
 impl DocumentInProgress {
@@ -114,6 +119,7 @@ impl DocumentInProgress {
                 start: p.start,
                 end: p.end,
                 contains_edt: false,
+                needs_eng: p.needs_eng,
             })
             .collect();
 
@@ -122,6 +128,7 @@ impl DocumentInProgress {
                 start: self.start,
                 end: self.end,
                 contains_edt: true,
+                needs_eng: false,
             });
         }
 
@@ -145,6 +152,7 @@ impl ChunkPlanner {
         let mut current_doc_start: u64 = 0;
         let mut current_doc_prologue_end: u64 = 0;
         let mut current_needs_edt: bool = false;
+        let mut current_needs_eng: bool = false;
 
         for doc in documents {
             if !current_pgs.is_empty() {
@@ -153,6 +161,7 @@ impl ChunkPlanner {
                     current_doc_start,
                     current_doc_prologue_end,
                     current_needs_edt,
+                    current_needs_eng,
                 ));
                 current_size = 0;
             }
@@ -172,6 +181,7 @@ impl ChunkPlanner {
                         current_doc_start,
                         current_doc_prologue_end,
                         current_needs_edt,
+                        current_needs_eng,
                     ));
                     current_size = 0;
                 }
@@ -180,6 +190,7 @@ impl ChunkPlanner {
                     current_doc_start = doc.start;
                     current_doc_prologue_end = doc.prologue_end;
                     current_needs_edt = !pg.contains_edt;
+                    current_needs_eng = pg.needs_eng;
                     current_size = doc.prologue_size() + edt_cost;
                 }
 
@@ -194,6 +205,7 @@ impl ChunkPlanner {
                 current_doc_start,
                 current_doc_prologue_end,
                 current_needs_edt,
+                current_needs_eng,
             ));
         }
 
@@ -205,6 +217,7 @@ impl ChunkPlanner {
         doc_start: u64,
         prologue_end: u64,
         needs_edt: bool,
+        needs_eng: bool,
     ) -> OutputChunk {
         let pg_range = (
             pgs.first().map_or(0, |p| p.start),
@@ -215,6 +228,7 @@ impl ChunkPlanner {
             pg_range,
             page_groups: std::mem::take(pgs),
             needs_edt,
+            needs_eng,
         }
     }
 }

@@ -6,6 +6,7 @@ use crate::chunk::OutputChunk;
 use crate::patterns::{PF_END, PF_START};
 
 const EDT: &[u8] = b"\xD3\xA9\xA8";
+const ENG: &[u8] = b"\xD3\xA9\xAD";
 
 pub struct OutputWriter {
     output_dir: PathBuf,
@@ -69,6 +70,11 @@ impl OutputWriter {
                     Read::by_ref(&mut source_file).take(pg_end - pg_start);
                 let n = io::copy(&mut pg_bytes, &mut output)?;
                 bytes_written += n;
+            }
+
+            if chunk.needs_eng {
+                output.write_all(ENG)?;
+                bytes_written += ENG.len() as u64;
             }
 
             if chunk.needs_edt {

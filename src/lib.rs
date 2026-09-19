@@ -1,5 +1,10 @@
 pub mod boundary;
 pub mod chunk;
+pub mod features;
+pub mod inspect;
 pub mod patterns;
+pub mod record;
 pub mod state;
+pub mod text;
+pub mod triplet;
 pub mod writer;
